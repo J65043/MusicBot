@@ -530,4 +530,4 @@ async def on_ready():
 async def setup(bot):
     await bot.add_cog(Music(bot))
 asyncio.run(setup(bot))
-bot.run("MTA5Mzc2MTM4MzExMzQyNDk5OQ.GIeMYx.UXuSTVcxTivgBtHcrTWtaM7Xhy5WFGTsuAYnJQ")
+bot.run(TOKEN)
