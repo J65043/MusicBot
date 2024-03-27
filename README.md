@@ -73,4 +73,4 @@ This Discord MusicBot allows users to play music from YouTube and other supporte
     Ensure your Discord bot has the necessary permissions to read messages, connect to voice channels,speak, message content intent, server members intent and presence intent.
 
 # Credits
-`updated code from here https://gist.github.com/vbe0201/ade9b80f2d3b64643d854938d40a0a2d`
+updated code from here https://gist.github.com/vbe0201/ade9b80f2d3b64643d854938d40a0a2d
