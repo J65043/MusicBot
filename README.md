@@ -34,7 +34,7 @@ This Discord MusicBot allows users to play music from YouTube and other supporte
     Start the Bot:
         Run the script using Python:
 
-        python3 your_script_name.py
+        python3 discordbot.py
 
     Invite the Bot to Your Server:
         Use the Discord developer portal to invite your bot to the server.
