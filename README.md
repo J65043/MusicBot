@@ -1,5 +1,5 @@
-MusicBot README
-Introduction
+
+#Introduction
 
 This Discord MusicBot allows users to play music from YouTube and other supported sites directly in a Discord voice channel. It supports various commands for music playback, such as play, pause, skip, and volume control.
 Prerequisites
@@ -9,14 +9,14 @@ Prerequisites
     yt-dlp library
     A Discord bot token
 
-Setup
+#Setup
 
     Environment Setup:
         Install the required Python packages using pip:
 
     pip install -U discord.py yt-dlp python-dotenv
 
-Bot Token:
+# Bot Token:
 
     Create a file named Token.env in your project directory.
     Place your Discord bot token in the file like this:
@@ -28,7 +28,7 @@ Bot Token:
     Bot Permissions:
         Make sure your bot has permissions to join and speak in voice channels.
 
-Running the Bot
+# Running the Bot
 
     Start the Bot:
         Run the script using Python:
@@ -38,7 +38,7 @@ Running the Bot
     Invite the Bot to Your Server:
         Use the Discord developer portal to invite your bot to the server.
 
-Usage
+# Usage
 
     Join a Voice Channel:
     /join - The bot joins the voice channel you are currently in.
@@ -67,7 +67,11 @@ Usage
     Leaving the Channel:
     /leave - Stops the music and makes the bot leave the voice channel.
 
-Additional Information
+# Additional Information
 
     Ensure your Discord bot has the necessary permissions to read messages, connect to voice channels,speak, message content intent, server members intent and presence intent.
+
+# Credits
+updated code to function with latest discord python api from here 
+https://gist.github.com/vbe0201/ade9b80f2d3b64643d854938d40a0a2d
     
