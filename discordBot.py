@@ -10,8 +10,14 @@ import sys
 import yt_dlp as youtube_dl
 from async_timeout import timeout
 from dotenv import load_dotenv
-import utils
 
+import re
+
+
+
+def debug_print(message):
+    if '-debug' in sys.argv:
+        print(f"DEBUG: {message}")
 # Silence useless bug reports messages
 youtube_dl.utils.bug_reports_message = lambda: ''
 
@@ -39,6 +45,8 @@ class YTDLSource(discord.PCMVolumeTransformer):
         'no_warnings': True,
         'default_search': 'auto',
         'source_address': '0.0.0.0',
+	'force-ipv4': True,
+        'cachedir': False
     }
 
     FFMPEG_OPTIONS = {
@@ -48,13 +56,13 @@ class YTDLSource(discord.PCMVolumeTransformer):
 
     ytdl = youtube_dl.YoutubeDL(YTDL_OPTIONS)
     
-    def __init__(self, ctx: discord.ApplicationContext, source: discord.FFmpegPCMAudio, *, data: dict, volume: float = 0.5):
+    def __init__(self, ctx: discord.ApplicationContext, source: discord.FFmpegPCMAudio, *, data: dict, volume: float = 0.5, incomplete=True):
         super().__init__(source, volume)
-	
+        self.incomplete = incomplete
         self.requester = ctx.author
         self.channel = ctx.channel
         self.data = data
-
+        
         self.uploader = data.get('uploader')
         self.uploader_url = data.get('uploader_url')
         date = data.get('upload_date')
@@ -69,54 +77,117 @@ class YTDLSource(discord.PCMVolumeTransformer):
         self.likes = data.get('like_count')
         self.dislikes = data.get('dislike_count')
         self.stream_url = data.get('url')
+    
+    
 
+
+
+    @staticmethod
+    async def get_stream_url(search: str, loop=None) -> str:
+        loop = loop or asyncio.get_event_loop()
+        ydl_opts = {
+            'quiet': True,
+            'extract_flat': True,
+            'NoPlaylist': False,
+            'force_generic_extractor': True,
+            'extract_audio': True,
+            'audioformat': "mp3",
+        }
+        with youtube_dl.YoutubeDL(ydl_opts) as ydl:
+            partial = functools.partial(ydl.extract_info, search, download=False, process=True)
+            data = await loop.run_in_executor(None, partial)
+            if data is None:
+                raise YTDLError('Couldn\'t find anything that matches `{}`'.format(search))
+            return data['url']
+        
+
+    
+    async def load(self):
+        if not self._loaded:
+            stream_url = await YTDLSource.get_stream_url(self.url, self.ctx.bot.loop)
+            self.source = discord.FFmpegPCMAudio(stream_url, **self.FFMPEG_OPTIONS)
+            self._loaded = True
+    def cleanup(self):
+        if hasattr(self, 'source') and self.source is not None and hasattr(self.source, 'original'):
+            self.source.cleanup()
     def __str__(self):
         return '**{0.title}** by **{0.uploader}**'.format(self)
+    
+
 
     @classmethod
     async def create_source(cls, ctx: discord.ApplicationContext, search: str, *, loop: asyncio.BaseEventLoop = None):
+        debug_print("Executing create_source Function")
         loop = loop or asyncio.get_event_loop()
+        stream_url = await YTDLSource.get_stream_url(search, loop)
+        source = discord.FFmpegPCMAudio(stream_url, **cls.FFMPEG_OPTIONS)
+        return cls(ctx, source, data=None)  # You can populate data if needed
 
-        partial = functools.partial(cls.ytdl.extract_info, search, download=False, process=False)
+    
+    def update_source(self,new_url: str):
+
+        self.source = discord.FFmpegPCMAudio(new_url, **self.FFMPEG_OPTIONS)
+        self.incomplete = False
+    async def fetch_data(self, loop=None):
+        debug_print("Excuteing Fetch_data Function")
+        loop = loop or asyncio.get_event_loop()
+        
+        url = self.url
+        debug_print(self.url)
+        if not url:
+            raise YTDLError('URL NOT SET FOR SOME REASON')
+        partial = functools.partial(YTDLSource.ytdl.extract_info, url, download=False, process=True)
         data = await loop.run_in_executor(None, partial)
-
+        debug_print(data)
         if data is None:
-            raise YTDLError('Couldn\'t find anything that matches `{}`'.format(search))
+            raise YTDLError('Couldn\'t fetch `{}`'.format(url))
+        #debug print title
+        debug_print(f"Title: {data['title']}")
+        debug_print(data['url'])
+        self.data.update(data)
+        self.update_source(data['url'])
+        
+        self.incomplete = False
 
-        if 'entries' not in data:
-            process_info = data
-        else:
-            process_info = None
-            for entry in data['entries']:
-                if entry:
-                    process_info = entry
-                    break
+    @classmethod
+    async def Lazy_create_source(cls, ctx: discord.ApplicationContext, search: str, *, loop: asyncio.BaseEventLoop = None):
+        debug_print("Excuteing Lazy_create_source Function")
+        loop = loop or asyncio.get_event_loop()
+        #extract only the url from the search
+        ydl_opts = {
+            'quiet': True,
+            'extract_flat': True,
+            'NoPlaylist': False,
+            'force_generic_extractor': True,
+            'extract_audio': True,
+            'audioformat': "mp3",
 
-            if process_info is None:
+        }
+        with youtube_dl.YoutubeDL(ydl_opts) as ydl:
+            partial = functools.partial(ydl.extract_info, search, download=False, process=False)
+            data = await loop.run_in_executor(None, partial)
+            if data is None:
                 raise YTDLError('Couldn\'t find anything that matches `{}`'.format(search))
+            if 'entries' not in data:
+                process_info = data
+            #check if type is playist
+            if 'entries' in data:
+                sources = []
+                for entry in data['entries']:
+                    placeholder_data = "placeholder.mp3"
+                    placeholder = discord.FFmpegPCMAudio(placeholder_data)
+                    source = cls(ctx, placeholder, data=entry,incomplete=True)
+                    sources.append(source)
+                return sources
+            else:
+                placeholder_data = "placeholder.mp3"
+                placeholder = discord.FFmpegPCMAudio(placeholder_data)
+                source = cls(ctx,  placeholder, data=data,incomplete=True)
+                return [source]
 
-        webpage_url = process_info['webpage_url']
-        partial = functools.partial(cls.ytdl.extract_info, webpage_url, download=False)
-        processed_info = await loop.run_in_executor(None, partial)
+                  
 
-        if processed_info is None:
-            raise YTDLError('Couldn\'t fetch `{}`'.format(webpage_url))
 
-        if 'entries' not in processed_info:
-            info = processed_info
-        else:
-            info = None
-            while info is None:
-                try:
-                    info = processed_info['entries'].pop(0)
-                except IndexError:
-                    raise YTDLError('Couldn\'t retrieve any matches for `{}`'.format(webpage_url))
-
-        try:
-            cls = cls(ctx, discord.FFmpegPCMAudio(info['url'], **cls.FFMPEG_OPTIONS), data=info)
-        except discord.ClientException:
-            raise YTDLError("FFmpegPCMAudio Subprocess failed to be created. Is one already running?")
-        return cls
     @staticmethod
     def parse_duration(duration: int):
         minutes, seconds = divmod(duration, 60)
@@ -223,22 +294,35 @@ class VoiceState:
         return self.voice and self.current
 
     async def audio_player_task(self):
+        debug_print("Excuteing audio_player_task Function")
         while True:
             self.next.clear()
-
+            debug_print("Audio_player_task:in loop")
             if not self.loop:
                 # Try to get the next song within 3 minutes.
                 # If no song will be added to the queue in time,
                 # the player will disconnect due to performance
                 # reasons.
                 try:
-                    async with timeout(5):  # 3 minutes
+                    async with timeout(30):  # 3 minutes
+                        debug_print("Audio_player_task:getting song")
                         self.current = await self.songs.get()
+                        if(self.current):
+                            debug_print(f"Current Song: {self.current.source.title}")
                 except asyncio.TimeoutError:
                     
                                  
                     self.bot.loop.create_task(self.stop())    
                     return False
+                
+            if(self.current.source.incomplete):
+                await self.current.source.fetch_data(loop=self.bot.loop)
+                
+            
+            #checks to see if source is ready
+            while self.current.source is None or self.current.source.incomplete:
+                debug_print("Sleeping")
+                await asyncio.sleep(1)  # wait for 1 second before checking again
 
             self.current.source.volume = self._volume
             try:
@@ -358,7 +442,7 @@ class Music(commands.Cog):
         await ctx.respond('Volume of the player set to {}%'.format(volume))
     @commands.slash_command(name='restart')
     async def restart(self,ctx: discord.ApplicationContext):
-        #bandaid fix a long time ago for the player, its not necessary now but its still here.
+        
         await ctx.respond('Restarting bot...')
         os.execv(sys.executable,['python3'] +sys.argv)
 	
@@ -488,6 +572,50 @@ class Music(commands.Cog):
             await ctx.respond("unlooping playlist")
 
 
+
+    @commands.slash_command(name='download',description= 'Download a song')
+    async def download(self, ctx:discord.ApplicationContext, url:discord.Option(discord.SlashCommandOptionType.string), format: discord.Option(str, choices=['wav','mp3'])):
+    # Check the format
+	
+
+        # Download options for youtube-dl
+        ydl_opts = {
+            'format': 'bestaudio/best',
+            'outtmpl': 'downloads/%(title)s.%(ext)s',
+            'noplaylist': True,
+            'postprocessors': [{
+                'key': 'FFmpegExtractAudio',
+                'preferredcodec': format,
+                'preferredquality': '192',
+            }],
+            'quiet': True
+        }
+        await ctx.response.defer()
+        print("Recived Download command")
+        # Download the song
+        print("About to start youtube_dl.YoutubeDL")
+        with youtube_dl.YoutubeDL(ydl_opts) as ydl:
+            print("Inside youtube_dl.YoutubeDL block")
+            info = ydl.extract_info(url, download=True)
+            print("Extracted info")
+            filename = ydl.prepare_filename(info)
+            print("Prepared filename")
+            filename = filename.rsplit(".", 1)[0] + f'.{format}'
+        print("downloading",filename)
+        
+        # Extract and sanitize the song title
+        song_title = info.get('title', 'Unknown')
+        song_title = re.sub(r'[^\w\s-]', '', song_title).strip()  # remove non-alphanumeric, non-space, non-hyphen characters
+        song_title = re.sub(r'\s+', '_', song_title)  # replace spaces with underscores
+        song_title = song_title[:255-len(format)-1]  # ensure the filename does not exceed 255 characters
+
+        # Upload the song
+        with open(filename, 'rb') as fp:
+            await ctx.followup.send(file=discord.File(fp, f'{song_title}.{format}'))
+            # Delete the song
+        os.remove(filename)
+
+
     @commands.slash_command(name='play',description='plays a song')
     async def _play(self, ctx: discord.ApplicationContext, *, search: str):
         """Plays a song.
@@ -496,27 +624,42 @@ class Music(commands.Cog):
         This command automatically searches from various sites if no URL is provided.
         A list of these sites can be found here: https://rg3.github.io/youtube-dl/supportedsites.html
         """
-
+        debug_print("Excuteing _play Function")
+        #joins if not in voice channel
         if not ctx.voice_state.voice:
-            await ctx.invoke(self._join)
+            destination = ctx.author.voice.channel
+            if ctx.voice_state.voice:
+                await ctx.voice_state.voice.move_to(destination)
+                return
+
+            ctx.voice_state.voice = await destination.connect()
+            
         
+        await ctx.response.defer()
 
         if ctx.voice_state.audio_player.done():
             ctx.voice_state.audio_player = self.bot.loop.create_task(ctx.voice_state.audio_player_task())
-            await ctx.respond("Restarted player.",ephemeral=True)
+            await ctx.followup.send("Restarted player.")
 
             
         async with ctx.typing():
             try:
-                source = await YTDLSource.create_source(ctx, search, loop=self.bot.loop)
+        
+                debug_print("_play:calling Lazy_create_source")
+                
+                sources = await YTDLSource.Lazy_create_source(ctx, search, loop=self.bot.loop)
                 
             except YTDLError as e:
-                await ctx.respond('An error occurred while processing this request: {}'.format(str(e)))
+                await ctx.followup.send('An error occurred while processing this request: {}'.format(str(e)))
             else:
-                song = Song(source)
-
-                await ctx.voice_state.songs.put(song)
-                await ctx.respond('Enqueued {}'.format(str(source)))
+                debug_print("_play:calling ctx.voice_state.songs.put")
+                for source in sources:
+                    song = Song(source)
+                    await ctx.voice_state.songs.put(song)
+                if(len(sources) == 1):
+                    await ctx.followup.send('Enqueued {}'.format(str(source)))
+                else:
+                    await ctx.followup.send('Enqueued {} songs'.format(len(sources)))
                 
                 
 
