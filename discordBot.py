@@ -239,8 +239,8 @@ class VoiceState:
     async def audio_player_task(self):
         while True:
             self.next.clear()
-
-            if not self.loop:
+            #check if looping or
+            if not self.loop or self.current is None:
                 # Try to get the next song within 3 minutes.
                 # If no song will be added to the queue in time,
                 # the player will disconnect due to performance
@@ -259,7 +259,8 @@ class VoiceState:
                 self.voice.play(self.current.source, after=self.play_next_song)
             except Exception as e:
                 print('Error occured when trying to play song {}'.format(e))
-            
+                await self.stop()
+                return
 
 
             self.NowPlayingMessage = await self.current.source.channel.send(embed=self.current.create_embed())
@@ -280,11 +281,14 @@ class VoiceState:
 
     async def stop(self):
         self.songs.clear()
-
+    #proper cleanup
         if self.voice:
             self.voice.stop()
             await self.voice.disconnect()
             self.voice = None
+        if self.audio_player:
+            self.audio_player.cancel()
+            self.audio_player = None
         
             
 
@@ -325,6 +329,9 @@ class Music(commands.Cog):
                 successfully_reconnected = await self.reconnect_voice_client(before.guild.id,before.channel)
             if successfully_reconnected:
                 await voice_state.resume_music()
+            if voice_state and not voice_state.is_playing:
+                await voice_state.stop()
+                del self.voice_states[before.guild.id]
 
     @commands.slash_command(name='join', invoke_without_subcommand=True)
     async def _join(self, ctx: discord.ApplicationContext):
@@ -482,6 +489,49 @@ class Music(commands.Cog):
 
         ctx.voice_state.songs.shuffle()
         await ctx.respond('Shuffled Playlist')
+    
+    @commands.slash_command(name='download',description= 'Download a song')
+    async def download(self, ctx:discord.ApplicationContext, url:discord.Option(discord.SlashCommandOptionType.string), format: discord.Option(str, choices=['wav','mp3'])):
+    # Check the format
+	
+
+        # Download options for youtube-dl
+        ydl_opts = {
+            'format': 'bestaudio/best',
+            'outtmpl': 'downloads/%(title)s.%(ext)s',
+            'noplaylist': True,
+            'postprocessors': [{
+                'key': 'FFmpegExtractAudio',
+                'preferredcodec': format,
+                'preferredquality': '192',
+            }],
+            'quiet': True
+        }
+        await ctx.response.defer()
+        print("Recived Download command")
+        # Download the song
+        print("About to start youtube_dl.YoutubeDL")
+        with youtube_dl.YoutubeDL(ydl_opts) as ydl:
+            print("Inside youtube_dl.YoutubeDL block")
+            info = ydl.extract_info(url, download=True)
+            print("Extracted info")
+            filename = ydl.prepare_filename(info)
+            print("Prepared filename")
+            filename = filename.rsplit(".", 1)[0] + f'.{format}'
+        print("downloading",filename)
+        
+        # Extract and sanitize the song title
+        song_title = info.get('title', 'Unknown')
+        song_title = re.sub(r'[^\w\s-]', '', song_title).strip()  # remove non-alphanumeric, non-space, non-hyphen characters
+        song_title = re.sub(r'\s+', '_', song_title)  # replace spaces with underscores
+        song_title = song_title[:255-len(format)-1]  # ensure the filename does not exceed 255 characters
+
+        # Upload the song
+        with open(filename, 'rb') as fp:
+            await ctx.followup.send(file=discord.File(fp, f'{song_title}.{format}'))
+            # Delete the song
+        os.remove(filename)
+
 
     @commands.slash_command(name='remove')
     async def _remove(self, ctx: discord.ApplicationContext, index: int):
