@@ -202,10 +202,24 @@ class VoiceState:
     def loop(self):
         return self._loop
 
+    async def resume_music(self):
+        if self.current and not self.voice.is_playing():
+            self.voice.play(self.current.source, after=self.play_next_song)
+            # optionally reset other settings hre.
+
+
     @loop.setter
     def loop(self, value: bool):
         self._loop = value
 
+    @property
+    async def is_in_channel(self):
+        guild = self._ctx.guild
+        if guild.voice_client is None:
+            await self._ctx.respond('Not connected to any voice channel.',ephemeral=True)
+            return False
+        else:
+            return True
     @property
     def volume(self):
         return self._volume
@@ -246,8 +260,7 @@ class VoiceState:
             except Exception as e:
                 print('Error occured when trying to play song {}'.format(e))
             
-            #if self.NowPlayingMessage:
-                #await self.NowPlayingMessage.delete()
+
 
             self.NowPlayingMessage = await self.current.source.channel.send(embed=self.current.create_embed())
 
@@ -303,6 +316,15 @@ class Music(commands.Cog):
 
     async def cog_command_error(self, ctx: discord.ApplicationContext, error: commands.CommandError):
         await ctx.respond('An error occurred: {}'.format(str(error)))
+    #checks for sudden disconnect and reconnects the bot to the voice channel
+    @commands.Cog.listener()
+    async def on_voice_state_update(self, member, before,after):
+        if member.id == self.bot.user.id and before.channel is not None and after.channel is None:
+            voice_state = self.get_voice_state(before.guild.id)
+            if voice_state and voice_state.is_playing:
+                successfully_reconnected = await self.reconnect_voice_client(before.guild.id,before.channel)
+            if successfully_reconnected:
+                await voice_state.resume_music()
 
     @commands.slash_command(name='join', invoke_without_subcommand=True)
     async def _join(self, ctx: discord.ApplicationContext):
@@ -497,7 +519,7 @@ class Music(commands.Cog):
         A list of these sites can be found here: https://rg3.github.io/youtube-dl/supportedsites.html
         """
 
-        if not ctx.voice_state.voice:
+        if not ctx.voice_state.voice or not ctx.voice_state.is_in_channel():
             await ctx.invoke(self._join)
         
 
