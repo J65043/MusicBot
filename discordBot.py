@@ -518,47 +518,7 @@ class Music(commands.Cog):
                 await ctx.voice_state.songs.put(song)
                 await ctx.respond('Enqueued {}'.format(str(source)))
                 
-    @commands.slash_command(name='download',description= 'Download a song')
-    async def download(self, ctx:discord.ApplicationContext, url:discord.Option(discord.SlashCommandOptionType.string), format: discord.Option(str, choices=['wav','mp3'])):
-    # Check the format
-	
-
-        # Download options for youtube-dl
-        ydl_opts = {
-            'format': 'bestaudio/best',
-            'outtmpl': 'downloads/%(title)s.%(ext)s',
-            'noplaylist': True,
-            'postprocessors': [{
-                'key': 'FFmpegExtractAudio',
-                'preferredcodec': format,
-                'preferredquality': '192',
-            }],
-            'quiet': True
-        }
-        await ctx.response.defer()
-        print("Recived Download command")
-        # Download the song
-        print("About to start youtube_dl.YoutubeDL")
-        with youtube_dl.YoutubeDL(ydl_opts) as ydl:
-            print("Inside youtube_dl.YoutubeDL block")
-            info = ydl.extract_info(url, download=True)
-            print("Extracted info")
-            filename = ydl.prepare_filename(info)
-            print("Prepared filename")
-            filename = filename.rsplit(".", 1)[0] + f'.{format}'
-        print("downloading",filename)
-        
-        # Extract and sanitize the song title
-        song_title = info.get('title', 'Unknown')
-        song_title = re.sub(r'[^\w\s-]', '', song_title).strip()  # remove non-alphanumeric, non-space, non-hyphen characters
-        song_title = re.sub(r'\s+', '_', song_title)  # replace spaces with underscores
-        song_title = song_title[:255-len(format)-1]  # ensure the filename does not exceed 255 characters
-
-        # Upload the song
-        with open(filename, 'rb') as fp:
-            await ctx.followup.send(file=discord.File(fp, f'{song_title}.{format}'))
-            # Delete the song
-        os.remove(filename)              
+                
 
     @_join.before_invoke
     @_play.before_invoke
